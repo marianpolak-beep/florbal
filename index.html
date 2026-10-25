@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Florbalové Striedanie Live</title>
+    <script src="https://cloudflare.com"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body, html { width: 100%; height: 100%; overflow: hidden; font-family: sans-serif; user-select: none; background: #000; }
+        .screen { display: flex; width: 100%; height: 100%; position: absolute; top:0; left:0; z-index: 1; }
+        .half { flex: 1; height: 100%; }
+        .menu-btn { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 10; padding: 8px 20px; background: rgba(0,0,0,.8); color: #fff; border: 1px solid #fff; border-radius: 15px; cursor: pointer; font-size: 14px; font-weight: bold; }
+        .overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,.95); z-index: 5; display: flex; flex-direction: column; justify-content: center; align-items: center; color: #fff; padding: 10px; }
+        .hidden { display: none !important; }
+        .columns { display: flex; gap: 15px; margin-bottom: 10px; width: 100%; max-width: 600px; }
+        .col { flex: 1; text-align: center; }
+        .col h3 { margin-bottom: 6px; font-size: 14px; letter-spacing: 1px; color: #bbb; }
+        .color-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+        .btn-color { padding: 8px 4px; border: 2px solid transparent; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 12px; text-shadow: 1px 1px 1px #000; box-shadow: 0 1px 3px rgba(0,0,0,.3); width: 100%; }
+        .btn-color.active { border-color: #fff; box-shadow: 0 0 8px #fff; transform: scale(1.02); }
+        .close-btn { padding: 10px 40px; background: #27ae60; color: #fff; border: none; border-radius: 20px; font-size: 15px; font-weight: bold; cursor: pointer; box-shadow: 0 3px 6px rgba(39,174,96,.4); }
+        .status { position: absolute; bottom: 5px; font-size: 10px; color: #555; z-index: 12; }
+    </style>
+</head>
+<body>
+
+    <button class="menu-btn" onclick="toggleMenu()">⚙️ Nastaviť zápas</button>
+    <div id="status" class="status">Pripájanie k sieti...</div>
+
+    <div class="screen">
+        <div id="leftHalf" class="half"></div>
+        <div id="rightHalf" class="half"></div>
+    </div>
+
+    <div id="menuOverlay" class="overlay">
+        <h2 id="title" style="margin-bottom: 8px; font-size: 18px;">Pripojenie haly</h2>
+        
+        <!-- Prihlasovacie políčko -->
+        <div id="setupDiv" style="margin-bottom: 15px; text-align:center;">
+            <input type="text" id="roomIdInput" value="galaktikos" style="padding: 8px; font-size: 14px; border-radius: 5px; border: none; text-align: center; margin-bottom: 10px;"><br>
+            <button class="close-btn" style="background:#2980b9; margin-right:5px; font-size:13px; padding:8px 15px;" onclick="startAs('tabula')">Zobraziť TABUĽU</button>
+            <button class="close-btn" style="background:#8e44ad; font-size:13px; padding:8px 15px;" onclick="startAs('ovladac')">Zobraziť OVLÁDAČ</button>
+        </div>
+
+        <!-- Samotné striedanie farieb (skryté na začiatku) -->
+        <div id="controlsDiv" class="hidden" style="width:100%; display:flex; flex-direction:column; align-items:center;">
+            <div class="columns">
+                <div class="col">
+                    <h3>TÍM 1 (Vľavo)</h3>
+                    <div class="color-grid" id="leftGrid"></div>
+                </div>
+                <div class="col">
+                    <h3>TÍM 2 (Vpravo)</h3>
+                    <div class="color-grid" id="rightGrid"></div>
+                </div>
+            </div>
+            <button class="close-btn" onclick="sendMatch()">SPUSTIŤ ZÁPAS 🚀</button>
+        </div>
+    </div>
+
+    <script>
+        const colors=[
+            {name:"Zelená 🟢",value:"green",text:"white"},
+            {name:"Oranžová 🟠",value:"orange",text:"black"},
+            {name:"Ružová 🌸",value:"deeppink",text:"white"},
+            {name:"Modrá 🔵",value:"blue",text:"white"},
+            {name:"Čierna ⚫",value:"black",text:"white"},
+            {name:"Červená 🔴",value:"red",text:"white"},
+            {name:"Biela ⚪",value:"white",text:"black"}
+        ];
+        
+        let activeLeft="green", activeRight="orange", peer = null, conn = null, myMode = "";
+
+        function startAs(mode) {
+            myMode = mode;
+            const roomId = document.getElementById("roomIdInput").value.trim().toLowerCase();
+            if(!roomId) return alert("Zadaj názov haly!");
+            
+            document.getElementById("setupDiv").classList.add("hidden");
+            document.getElementById("title").innerText = "Hala: " + roomId.toUpperCase();
+            
+            if(mode === 'tabula') {
+                peer = new Peer(roomId + "-tabula");
+                document.getElementById("status").innerText = "Tabuľa čaká na ovládač...";
+                peer.on('connection', c => {
+                    conn = c;
+                    document.getElementById("status").innerText = "Ovládač pripojený ✅";
+                    setupDataListener();
+                });
+                document.getElementById("menuOverlay").classList.add("hidden");
+            } else {
+                peer = new Peer(roomId + "-ovladac");
+                document.getElementById("status").innerText = "Pripájanie k tabuli...";
+                setTimeout(() => {
+                    conn = peer.connect(roomId + "-tabula");
+                    conn.on('open', () => {
+                        document.getElementById("status").innerText = "Prepojené s tabuľou ✅";
+                    });
+                }, 1000);
+                document.getElementById("controlsDiv").classList.remove("hidden");
+                renderGrid("leftGrid","left");
+                renderGrid("rightGrid","right");
+            }
+            updateScreen();
+        }
+
+        function renderGrid(e,t){
+            const n=document.getElementById(e); n.innerHTML="";
+            colors.forEach(e=>{
+                const r=document.createElement("button"); r.className="btn-color"; r.style.backgroundColor=e.value; r.style.color=e.text; r.innerText=e.name;
+                if(("left"===t?activeLeft:activeRight)===e.value) r.classList.add("active");
+                r.onclick=()=> {
+                    const gridId = "left"===t?"leftGrid":"rightGrid";
+                    for (let b of document.getElementById(gridId).getElementsByClassName("btn-color")) b.classList.remove("active");
+                    r.classList.add("active");
+                    "left"===t?activeLeft=e.value:activeRight=e.value;
+                    updateScreen();
+                };
+                n.appendChild(r);
+            });
+        }
+
+        function sendMatch() {
+            if(conn && conn.open) {
+                conn.send({left: activeLeft, right: activeRight});
+            }
+            toggleMenu();
+        }
+
+        function setupDataListener() {
+            conn.on('data', data => {
+                if(data.left && data.right) {
+                    activeLeft = data.left; activeRight = data.right;
+                    updateScreen();
+                }
+            });
+        }
+
+        function updateScreen(){
+            document.getElementById("leftHalf").style.backgroundColor=activeLeft;
+            document.getElementById("rightHalf").style.backgroundColor=activeRight;
+        }
+        function toggleMenu(){ 
+            if(myMode === 'ovladac') document.getElementById("menuOverlay").classList.toggle("hidden"); 
+        }
+        document.getElementById("status").innerText = "Sieť pripravená. Zvoľte režim.";
+    </script>
+</body>
+</html>
